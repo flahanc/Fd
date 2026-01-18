@@ -1,25 +1,24 @@
 #!/bin/bash
 # Nano Script: SmartBotShield Ultimate vFinal
-# Умное усиление L3/L4/L7 + блокировка умных ботов
-# Финальная версия для Pterodactyl daemon, без записи логов на диск
-# Предназначен для сервера где уже стоит L3 L4 L7
+# Умное усиление L3/L4/L7 + блокировка умных ботов с циклом
+# Каждая функция с аннотацией, что она усиливает и для чего
 
 # -------------------- НАСТРОЙКИ --------------------
-MC_PORT=25565               # Порт Minecraft
-BAN_TIME=3600               # Время блокировки IP (сек)
-CPU_ALERT=85                # Порог CPU для усиления защиты (%)
-RAM_ALERT=85                # Порог RAM для усиления защиты (%)
-MAX_CONN_BASE=5             # Базовый лимит соединений
-SMART_MULTIPLIER=2          # Умножитель для динамического усиления лимита
-SMART_MULTIPLIER_MAX=5      # Максимальный лимит для защиты при нагрузке
-SUSPICIOUS_THRESHOLD=5      # Кол-во подозрительных действий до блокировки IP
+MC_PORT=25565
+BAN_TIME=3600
+CPU_ALERT=85
+RAM_ALERT=85
+MAX_CONN_BASE=5
+SMART_MULTIPLIER=2
+SMART_MULTIPLIER_MAX=5
+SUSPICIOUS_THRESHOLD=5
 
-# -------------------- ФУНКЦИИ --------------------
+NORMAL_INTERVAL=2
+FAST_INTERVAL=0.5
 
-# --- Умное усиление L4 (соединения) ---
+# --- L4: Усиление защиты соединений ---
 check_connections_smart() {
     netstat -ntu | grep ":$MC_PORT" | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | while read count ip; do
-        # Умная настройка лимита соединений
         if (( $(echo "$CPU_LOAD > $CPU_ALERT" | bc -l) || "$RAM_USED" -gt "$RAM_ALERT" )); then
             THRESHOLD=$SMART_MULTIPLIER_MAX
         else
@@ -35,7 +34,7 @@ check_connections_smart() {
     done
 }
 
-# --- Умный фильтр действий Minecraft L7 ---
+# --- L7: Усиление защиты прикладного уровня ---
 filter_minecraft_smart() {
     if [ -f "/srv/daemon-data/server.log" ]; then
         tail -n 200 /srv/daemon-data/server.log | grep -iE "fly|killall|spam|bot|speed|hack" | awk '{print $1}' | sort | uniq -c | while read c ip; do
@@ -49,21 +48,24 @@ filter_minecraft_smart() {
     fi
 }
 
-# --- Умный мониторинг L3 (нагрузка) ---
+# --- L3: Усиление защиты уровня нагрузки ---
 monitor_load_smart() {
     CPU_LOAD=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}')
     RAM_USED=$(free -m | awk 'NR==2{printf "%.0f", $3/$2 * 100}')
 
-    # Автоматическое усиление защиты при высокой нагрузке
     if (( $(echo "$CPU_LOAD > $CPU_ALERT" | bc -l) )) || [ "$RAM_USED" -gt "$RAM_ALERT" ]; then
-        echo "Высокая нагрузка CPU=$CPU_LOAD% RAM=$RAM_USED% — активное усиление защиты"
-        SMART_MULTIPLIER=SMART_MULTIPLIER_MAX
+        SMART_MULTIPLIER=$SMART_MULTIPLIER_MAX
+        INTERVAL=$FAST_INTERVAL
     else
         SMART_MULTIPLIER=2
+        INTERVAL=$NORMAL_INTERVAL
     fi
 }
 
-# -------------------- ЗАПУСК ФУНКЦИЙ --------------------
-monitor_load_smart
-check_connections_smart
-filter_minecraft_smart
+# -------------------- ГЛАВНЫЙ ЦИКЛ --------------------
+while true; do
+    monitor_load_smart
+    check_connections_smart
+    filter_minecraft_smart
+    sleep $INTERVAL
+done
